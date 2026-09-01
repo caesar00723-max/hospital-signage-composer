@@ -1,0 +1,175 @@
+// 병원 간판 합성 웹 폼 — GitHub Contents API + Actions API 연동
+// 토큰은 localStorage에만 저장되며 이 브라우저 밖으로 전송되지 않는다
+// (GitHub API 호출 시 Authorization 헤더로만 사용).
+
+const LS_KEY = "signage_composer_settings_v1";
+
+function loadSettings() {
+  try {
+    return JSON.parse(localStorage.getItem(LS_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function saveSettings(s) {
+  localStorage.setItem(LS_KEY, JSON.stringify(s));
+}
+
+function $(id) { return document.getElementById(id); }
+
+function setStatus(text, cls) {
+  const el = $("status");
+  el.textContent = text;
+  el.className = "status" + (cls ? " " + cls : "");
+}
+
+function appendStatus(text) {
+  $("status").textContent += "\n" + text;
+}
+
+// ---- 초기 로드: 저장된 설정 채워넣기 ----
+window.addEventListener("DOMContentLoaded", () => {
+  const s = loadSettings();
+  if (s.owner) $("owner").value = s.owner;
+  if (s.repo) $("repo").value = s.repo;
+  if (s.token) $("token").value = s.token;
+  if (!s.owner || !s.repo || !s.token) {
+    $("settingsBox").open = true;
+  }
+
+  $("panelColorPicker").addEventListener("input", (e) => {
+    $("panelColor").value = e.target.value.toUpperCase();
+  });
+  $("panelColor").addEventListener("input", (e) => {
+    const v = e.target.value;
+    if (/^#[0-9a-fA-F]{6}$/.test(v)) $("panelColorPicker").value = v;
+  });
+});
+
+$("saveSettings").addEventListener("click", () => {
+  const s = {
+    owner: $("owner").value.trim(),
+    repo: $("repo").value.trim(),
+    token: $("token").value.trim(),
+  };
+  saveSettings(s);
+  $("saveMsg").textContent = "저장됨";
+  setTimeout(() => ($("saveMsg").textContent = ""), 2000);
+});
+
+// ---- 유틸 ----
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result.split(",")[1]);
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+}
+
+function timestampName(originalName) {
+  const ext = (originalName.split(".").pop() || "png").toLowerCase();
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+  return `${stamp}.${ext}`;
+}
+
+async function gh(path, { owner, repo, token }, opts = {}) {
+  const res = await fetch(`https://api.github.com/repos/${owner}/${repo}${path}`, {
+    ...opts,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      ...(opts.headers || {}),
+    },
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`GitHub API 오류 (${res.status}): ${body.slice(0, 300)}`);
+  }
+  return res.status === 204 ? null : res.json();
+}
+
+// ---- 메인 흐름 ----
+$("composeForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const settings = loadSettings();
+  if (!settings.owner || !settings.repo || !settings.token) {
+    setStatus("먼저 상단 '저장소 연결 설정'을 채우고 저장하세요.", "error");
+    $("settingsBox").open = true;
+    return;
+  }
+
+  const fileInput = $("imageFile");
+  if (!fileInput.files.length) {
+    setStatus("이미지 파일을 선택하세요.", "error");
+    return;
+  }
+  const file = fileInput.files[0];
+  const nameKr = $("nameKr").value.trim();
+  const nameEn = $("nameEn").value.trim();
+  const panelColor = $("panelColor").value.trim();
+  const weight = $("weight").value;
+  const vertical = $("vertical").checked;
+
+  const btn = $("submitBtn");
+  btn.disabled = true;
+
+  try {
+    setStatus("① 기본 브랜치 확인 중...");
+    const repoInfo = await gh("", settings);
+    const branch = repoInfo.default_branch || "main";
+
+    setStatus("② 이미지를 저장소에 업로드하는 중...");
+    const base64 = await fileToBase64(file);
+    const remoteName = timestampName(file.name);
+    const remotePath = `inputs/${remoteName}`;
+
+    await gh(`/contents/${remotePath}`, settings, {
+      method: "PUT",
+      body: JSON.stringify({
+        message: `chore: add input image ${remoteName}`,
+        content: base64,
+        branch,
+      }),
+    });
+
+    appendStatus(`   업로드 완료 → ${remotePath}`);
+    setStatus($("status").textContent); // keep accumulated text
+
+    appendStatus("③ GitHub Actions 워크플로우 실행 요청 중...");
+    await gh(`/actions/workflows/compose-signage.yml/dispatches`, settings, {
+      method: "POST",
+      body: JSON.stringify({
+        ref: branch,
+        inputs: {
+          image_path: remotePath,
+          name_kr: nameKr,
+          name_en: nameEn,
+          panel_color: panelColor,
+          weight: weight,
+          vertical: vertical ? "true" : "false",
+        },
+      }),
+    });
+
+    const actionsUrl = `https://github.com/${settings.owner}/${settings.repo}/actions`;
+    appendStatus("④ 실행 요청 완료!");
+    appendStatus(`   진행 상황과 결과물(Artifact) 다운로드는 여기서 확인하세요:`);
+    setStatus($("status").textContent, "ok");
+    const link = document.createElement("a");
+    link.href = actionsUrl;
+    link.target = "_blank";
+    link.textContent = actionsUrl;
+    $("status").appendChild(document.createElement("br"));
+    $("status").appendChild(link);
+  } catch (err) {
+    console.error(err);
+    setStatus("오류 발생: " + err.message, "error");
+  } finally {
+    btn.disabled = false;
+  }
+});

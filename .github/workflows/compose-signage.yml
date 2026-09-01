@@ -1,0 +1,83 @@
+name: Compose Signage
+
+# 웹 폼(GitHub Pages)에서 GitHub API로 이 workflow_dispatch를 호출한다.
+# image_path는 웹 폼이 Contents API로 inputs/ 폴더에 먼저 커밋해둔 파일 경로.
+on:
+  workflow_dispatch:
+    inputs:
+      image_path:
+        description: "입력 이미지 경로 (예: inputs/2026-08-31-1200.png)"
+        required: true
+      name_kr:
+        description: "병원명 (한글)"
+        required: true
+      name_en:
+        description: "영문 부제 (선택)"
+        required: false
+        default: ""
+      panel_color:
+        description: "패널 색상 hex (예: #23262B)"
+        required: false
+        default: "#23262B"
+      weight:
+        description: "폰트 굵기: regular / bold / extrabold"
+        required: false
+        default: "bold"
+      vertical:
+        description: "세로쓰기 여부 (true/false) — 돌출간판·다닥다닥형에만 true"
+        required: false
+        default: "false"
+
+permissions:
+  contents: read
+
+jobs:
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v4
+
+      - name: 파이썬 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: 의존성 설치
+        run: pip install -r requirements.txt
+
+      - name: 입력 파일 확인
+        run: |
+          if [ ! -f "${{ inputs.image_path }}" ]; then
+            echo "::error::입력 파일을 찾을 수 없습니다: ${{ inputs.image_path }}"
+            exit 1
+          fi
+
+      - name: 합성 실행
+        id: run
+        run: |
+          set -e
+          mkdir -p outputs
+          BASENAME=$(basename "${{ inputs.image_path }}")
+          OUT="outputs/composed_${BASENAME}"
+          VFLAG=""
+          if [ "${{ inputs.vertical }}" = "true" ]; then VFLAG="--vertical"; fi
+
+          python scripts/cli_compose.py \
+            --input "${{ inputs.image_path }}" \
+            --output "$OUT" \
+            --name-kr "${{ inputs.name_kr }}" \
+            --name-en "${{ inputs.name_en }}" \
+            --panel-color "${{ inputs.panel_color }}" \
+            --weight "${{ inputs.weight }}" \
+            $VFLAG
+
+          echo "out_path=$OUT" >> "$GITHUB_OUTPUT"
+
+      - name: 결과물 업로드 (Artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: composed-signage-${{ github.run_number }}
+          path: ${{ steps.run.outputs.out_path }}
+          retention-days: 14

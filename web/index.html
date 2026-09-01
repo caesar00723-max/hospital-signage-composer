@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>병원 간판 합성 도구</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="wrap">
+    <h1>병원 간판 이미지 합성</h1>
+    <p class="sub">크로마키(마젠타) 패널이 포함된 생성 이미지에 한글 병원명을 자동 합성합니다.</p>
+
+    <details class="settings" id="settingsBox">
+      <summary>⚙️ 저장소 연결 설정 (최초 1회)</summary>
+      <div class="field">
+        <label>GitHub 저장소 소유자 (owner)</label>
+        <input type="text" id="owner" placeholder="예: my-clinic-org">
+      </div>
+      <div class="field">
+        <label>저장소 이름 (repo)</label>
+        <input type="text" id="repo" placeholder="예: hospital-signage-composer">
+      </div>
+      <div class="field">
+        <label>GitHub Personal Access Token</label>
+        <input type="password" id="token" placeholder="이 저장소 전용, Contents+Actions 권한만">
+        <p class="hint">
+          토큰은 이 브라우저에만 저장되며(localStorage), 저장소나 서버 어디에도 전송·기록되지 않습니다.
+          GitHub → Settings → Developer settings → Fine-grained tokens 에서
+          <b>이 저장소 하나만</b> 선택하고 <b>Contents: Read/Write, Actions: Read/Write</b> 권한만 부여해서 발급하세요.
+        </p>
+      </div>
+      <button id="saveSettings" type="button">저장</button>
+      <span id="saveMsg" class="msg"></span>
+    </details>
+
+    <form id="composeForm">
+      <div class="field">
+        <label>원본 이미지 (크로마키 패널 포함)</label>
+        <input type="file" id="imageFile" accept="image/png,image/jpeg" required>
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label>병원명 (한글)</label>
+          <input type="text" id="nameKr" placeholder="예: 서울베리굿치과" required>
+        </div>
+        <div class="field">
+          <label>영문 부제 (선택)</label>
+          <input type="text" id="nameEn" placeholder="예: SEOUL VERY GOOD DENTAL">
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label>패널 색상</label>
+          <div class="colorRow">
+            <input type="color" id="panelColorPicker" value="#23262b">
+            <input type="text" id="panelColor" value="#23262B">
+          </div>
+        </div>
+        <div class="field">
+          <label>폰트 굵기</label>
+          <select id="weight">
+            <option value="bold" selected>Bold</option>
+            <option value="extrabold">ExtraBold</option>
+            <option value="regular">Regular</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field checkboxField">
+        <label><input type="checkbox" id="vertical"> 세로쓰기 (돌출간판·다닥다닥형 전용)</label>
+      </div>
+
+      <button type="submit" id="submitBtn">간판 합성 실행 →</button>
+    </form>
+
+    <div id="status" class="status"></div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
