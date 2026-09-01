@@ -209,9 +209,11 @@ $("composeForm").addEventListener("submit", async (e) => {
 });
 
 // ---- 실행 완료 대기 ----
-async function findTriggeredRun(settings, sinceMs, maxTries = 8) {
+async function findTriggeredRun(settings, sinceMs, maxTries = 20) {
+  // GitHub이 workflow_dispatch 요청을 받아 실행(run)을 목록에 실제로 노출하기까지
+  // 지연이 12초를 넘는 경우가 있어(특히 초기 요청 직후) 타임아웃을 넉넉히 둔다.
   for (let i = 0; i < maxTries; i++) {
-    await sleep(1500);
+    await sleep(2000);
     const data = await gh(
       `/actions/workflows/compose-signage.yml/runs?event=workflow_dispatch&per_page=5`,
       settings
