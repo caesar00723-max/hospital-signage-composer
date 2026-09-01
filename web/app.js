@@ -45,6 +45,14 @@ window.addEventListener("DOMContentLoaded", () => {
     const v = e.target.value;
     if (/^#[0-9a-fA-F]{6}$/.test(v)) $("panelColorPicker").value = v;
   });
+
+  $("ledColorPicker").addEventListener("input", (e) => {
+    $("ledColor").value = e.target.value.toUpperCase();
+  });
+  $("ledColor").addEventListener("input", (e) => {
+    const v = e.target.value;
+    if (/^#[0-9a-fA-F]{6}$/.test(v)) $("ledColorPicker").value = v;
+  });
 });
 
 $("saveSettings").addEventListener("click", () => {
@@ -113,6 +121,9 @@ $("composeForm").addEventListener("submit", async (e) => {
   const nameEn = $("nameEn").value.trim();
   const panelColor = $("panelColor").value.trim();
   const weight = $("weight").value;
+  const material = $("material").value;
+  const ledColor = $("ledColor").value.trim();
+  const depth = $("depth").value.trim() || "auto";
   const vertical = $("vertical").checked;
 
   const btn = $("submitBtn");
@@ -151,6 +162,9 @@ $("composeForm").addEventListener("submit", async (e) => {
           name_kr: nameKr,
           name_en: nameEn,
           panel_color: panelColor,
+          material: material,
+          led_color: ledColor,
+          depth: depth,
           weight: weight,
           vertical: vertical ? "true" : "false",
         },

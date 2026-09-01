@@ -25,6 +25,22 @@ FONTS = {
     "extrabold": _os.path.join(_REPO_ROOT, "fonts", "NanumGothic-ExtraBold.ttf"),
 }
 
+# 소재 프리셋 — 비네트/노이즈/스펙큘러/베젤톤 조합
+MATERIAL_PRESETS = {
+    # 무광 아크릴 (기본) — 은은한 비네트, 미세 노이즈
+    "matte": dict(vignette=0.16, noise=3.5, specular=0.0, noise_kind="iso",
+                  bezel_rgb=(190, 190, 196), bezel_blend=0.72),
+    # 유광 아크릴 — 대비 강한 비네트 + 대각선 하이라이트 스트릭
+    "glossy": dict(vignette=0.26, noise=1.5, specular=0.35, noise_kind="iso",
+                   bezel_rgb=(210, 210, 216), bezel_blend=0.78),
+    # 헤어라인 브러시드 메탈 — 가로결 노이즈, 따뜻한 베젤톤
+    "brushed_metal": dict(vignette=0.12, noise=6.0, specular=0.12, noise_kind="aniso",
+                          bezel_rgb=(205, 195, 175), bezel_blend=0.80),
+    # 백라이트 패브릭 — 아주 부드러운 확산광, 베젤 약하게
+    "fabric": dict(vignette=0.08, noise=2.0, specular=0.0, noise_kind="iso",
+                   bezel_rgb=(160, 155, 150), bezel_blend=0.35),
+}
+
 
 # ---------------------------------------------------------------- 색상 유틸
 def _hex2rgb(h):
@@ -223,13 +239,127 @@ def clean_chroma_fringe(arr, mask, panel_rgb, feather_px=3, ring_px=8):
     return a.astype(np.uint8)
 
 
+# ---------------------------------------------------------------- 패널 재질 렌더링
+def render_panel_material(arr, mask, panel_color, material="matte", led_color=None):
+    """
+    평면 단색 채우기 대신 실제 백라이트 간판처럼 보이도록:
+      - 소재별 비네트 강도/노이즈 종류/스펙큘러 하이라이트
+      - 금속/패브릭 베젤(프레임) + LED 색상이 스며든 안쪽 하이라이트 라인
+    """
+    if not mask.any():
+        return arr
+    p = MATERIAL_PRESETS.get(material, MATERIAL_PRESETS["matte"])
+    h, w = mask.shape[:2]
+    dist = ndimage.distance_transform_edt(mask)
+    maxd = float(dist[mask].max()) or 1.0
+    norm = np.clip(dist / maxd, 0, 1)
+
+    factor = (1 - p["vignette"]) + p["vignette"] * norm
+    pc = np.array(panel_color, dtype=float)
+    out = arr.astype(float)
+    fill = pc[None, None, :] * factor[..., None]
+
+    rng = np.random.default_rng(0)
+    if p["noise_kind"] == "aniso":
+        # 브러시드 메탈: 가로 방향으로 긴 결 노이즈
+        base = rng.normal(0, p["noise"], size=(h, w // 6 + 1))
+        base = np.repeat(base, 6, axis=1)[:, :w]
+        noise = ndimage.uniform_filter(base, (1, 9))
+    else:
+        noise = ndimage.uniform_filter(rng.normal(0, p["noise"], size=(h, w)), 2)
+    fill = fill + noise[..., None]
+
+    if p["specular"] > 0:
+        # 대각선 하이라이트 스트릭 (유광 소재)
+        yy, xx = np.mgrid[0:h, 0:w]
+        diag = (xx * 0.6 + yy * 0.8) / (w * 0.6 + h * 0.8)
+        streak = np.exp(-((diag - 0.35) ** 2) / (2 * 0.02 ** 2)) * 255 * p["specular"]
+        fill = fill + streak[..., None]
+
+    out[mask] = np.clip(fill[mask], 0, 255)
+
+    bezel_px = max(3, int(min(h, w) * 0.004))
+    bezel_zone = mask & (dist <= bezel_px)
+    hi_zone = mask & (dist > bezel_px) & (dist <= bezel_px * 2)
+
+    bezel_rgb = np.array(p["bezel_rgb"], dtype=float)
+    out[bezel_zone] = out[bezel_zone] * (1 - p["bezel_blend"]) + bezel_rgb * p["bezel_blend"]
+
+    # 안쪽 하이라이트 라인 — LED 색상이 지정되면 그 색이 살짝 스며든 것처럼
+    if led_color is not None:
+        hi = np.array(led_color, dtype=float)
+        blend = 0.34
+    else:
+        hi = np.array([238, 238, 242], dtype=float)
+        blend = 0.28
+    out[hi_zone] = out[hi_zone] * (1 - blend) + hi * blend
+
+    return np.clip(out, 0, 255).astype(np.uint8)
+
+
+# ---------------------------------------------------------------- 두께감(입체) 표현
+def add_panel_depth(arr, faces, depth_px, panel_color, material="matte"):
+    """
+    패널 아래쪽에 어두운 측면(옆판)과 부드러운 낙하 그림자를 추가해
+    벽에서 살짝 떠 있는 박스형 간판의 두께감을 표현한다.
+    faces: [(tl, tr, br, bl), ...] — 각 면의 사변형 꼭짓점 (원본 이미지 좌표)
+    """
+    if depth_px <= 0:
+        return arr
+    h, w = arr.shape[:2]
+    out = arr.copy()
+    p = MATERIAL_PRESETS.get(material, MATERIAL_PRESETS["matte"])
+    side_rgb = tuple(int(c * 0.5) for c in panel_color)
+
+    # 1) 낙하 그림자 (더 아래, 더 흐림) — 측면보다 먼저 그려서 아래에 깔리게
+    shadow_img = Image.new("L", (w, h), 0)
+    sd = ImageDraw.Draw(shadow_img)
+    for (tl, tr, br, bl) in faces:
+        sh = (int(depth_px * 0.6), int(depth_px * 2.4))
+        poly = [
+            (bl[0] + sh[0] * 0.3, bl[1] + depth_px * 0.8),
+            (br[0] + sh[0] * 0.3, br[1] + depth_px * 0.8),
+            (br[0] + sh[0], br[1] + sh[1]),
+            (bl[0] + sh[0], bl[1] + sh[1]),
+        ]
+        sd.polygon([(int(x), int(y)) for x, y in poly], fill=140)
+    shadow_arr = np.array(shadow_img.filter(ImageFilter.GaussianBlur(max(2, depth_px * 0.5))), dtype=float) / 255.0
+    out = (out.astype(float) * (1 - shadow_arr[..., None] * 0.55)).astype(np.uint8)
+
+    # 2) 측면(두께) — 아래쪽 모서리를 depth_px만큼 내려서 어두운 색으로 채움
+    side_img = Image.new("RGB", (w, h))
+    side_img.paste(Image.fromarray(out))
+    sdraw = ImageDraw.Draw(side_img)
+    for (tl, tr, br, bl) in faces:
+        poly = [bl, br, (br[0], br[1] + depth_px), (bl[0], bl[1] + depth_px)]
+        sdraw.polygon([(int(x), int(y)) for x, y in poly], fill=side_rgb)
+        # 측면에도 살짝 세로 그라데이션(위가 밝고 아래가 어둡게)로 입체감 보강
+    out = np.array(side_img)
+
+    # 측면 하이라이트: 패널 하단 모서리에 얇은 밝은 라인 (전면-측면 경계 강조)
+    edge_img = Image.new("L", (w, h), 0)
+    ed = ImageDraw.Draw(edge_img)
+    for (tl, tr, br, bl) in faces:
+        ed.line([tuple(map(int, bl)), tuple(map(int, br))], fill=255, width=max(1, int(depth_px * 0.18)))
+    edge_mask = np.array(edge_img, dtype=bool)
+    out2 = out.astype(float)
+    out2[edge_mask] = out2[edge_mask] * 0.5 + np.array([255, 255, 255]) * 0.5
+    return np.clip(out2, 0, 255).astype(np.uint8)
+
+
 # ---------------------------------------------------------------- 메인
 def compose(path, texts, panel_color="#2B2B2B", text_color=None,
             weight="bold", vertical=False, out_path=None,
-            tracking=0.03, night_glow="auto", debug=False):
+            tracking=0.03, night_glow="auto", material="matte",
+            led_color=None, depth_px="auto", debug=False):
     """
     texts: 면별 텍스트. [[("병원명",1.0), ("ENG",0.42)], ...]
     night_glow: True/False/"auto" — auto면 주변 밝기로 야간 여부 자동 판정
+    material: "matte" / "glossy" / "brushed_metal" / "fabric"
+    led_color: LED 강조색(hex). 지정 시 텍스트 발광·베젤 하이라이트·테두리
+               번짐에 패널색과 별개로 이 색이 쓰인다. 미지정이면 글자색을 사용.
+    depth_px: 패널 두께 표현용 픽셀 값. "auto"면 패널 높이의 5%로 자동 계산,
+              0이면 두께감(측면/그림자) 표현을 끈다.
     """
     det = detect_chroma_panel(path)
     if det is None:
@@ -243,14 +373,22 @@ def compose(path, texts, panel_color="#2B2B2B", text_color=None,
     mask = det["mask"]
 
     pc = _hex2rgb(panel_color)
+    led = _hex2rgb(led_color) if led_color else None
     is_dark_scene = scene_is_dark(arr, mask) if night_glow == "auto" else bool(night_glow)
+
+    ys, xs = np.where(mask)
+    panel_h = (ys.max() - ys.min()) if ys.size else 100
+    if depth_px == "auto":
+        depth_px = max(4, int(panel_h * 0.05))
 
     # 1) 마스크를 살짝 확장해서 안티에일리어싱 경계(마젠타-배경 블렌드 픽셀)까지
     #    통째로 채움 영역에 포함시킨다 — 프린지 잔상의 근본 원인 제거
     fill_mask = ndimage.binary_dilation(mask, iterations=2)
-    arr[fill_mask] = pc
+    arr = render_panel_material(arr, fill_mask, pc, material=material, led_color=led)
     # 2) 그래도 남을 수 있는 미세 잔상을 한 번 더 정리
     arr = clean_chroma_fringe(arr, fill_mask, pc, ring_px=3)
+    # 3) 두께감(측면 + 낙하 그림자) — 텍스트를 얹기 전에 배경에 반영
+    arr = add_panel_depth(arr, geo["faces"], depth_px, pc, material=material)
 
     composed = Image.fromarray(arr).convert("RGBA")
 
@@ -262,25 +400,26 @@ def compose(path, texts, panel_color="#2B2B2B", text_color=None,
             raise ValueError(f"면 {len(faces)}개인데 텍스트는 {len(texts)}세트")
 
     tc = _hex2rgb(text_color) if text_color else auto_text_color(pc)
+    glow_color = led if led is not None else tc
 
     for quad, lines in zip(faces, texts):
-        xs = [p[0] for p in quad]; ys = [p[1] for p in quad]
-        w = max(int(max(xs) - min(xs)), 10)
-        h = max(int(max(ys) - min(ys)), 10)
+        xs2 = [p[0] for p in quad]; ys2 = [p[1] for p in quad]
+        w = max(int(max(xs2) - min(xs2)), 10)
+        h = max(int(max(ys2) - min(ys2)), 10)
 
         layer, _ = render_text_layer((w, h), lines, tc + (255,),
                                      weight=weight, vertical=vertical, tracking=tracking)
         if is_dark_scene:
-            layer = add_glow(layer, (w, h), tc, strength=1.0)
+            layer = add_glow(layer, (w, h), glow_color, strength=1.0)
 
         warped = _warp_onto(base.size, layer, quad)
         composed = Image.alpha_composite(composed, warped)
 
-    # 3) 야간 장면이면 패널 테두리에 은은한 빛 번짐 추가 (LED 백라이트 느낌)
+    # 4) 야간 장면이면 패널 테두리에 은은한 빛 번짐 추가 (LED 백라이트 느낌)
     if is_dark_scene:
         glow_mask = Image.fromarray((mask * 255).astype(np.uint8)).filter(
             ImageFilter.GaussianBlur(max(4, int(min(base.size) * 0.02))))
-        glow_layer = Image.new("RGBA", base.size, pc + (0,))
+        glow_layer = Image.new("RGBA", base.size, glow_color + (0,))
         gm = np.asarray(glow_mask).astype(float) * 0.35
         glow_layer.putalpha(Image.fromarray(gm.astype(np.uint8)))
         composed = Image.alpha_composite(composed, glow_layer)

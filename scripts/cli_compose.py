@@ -35,6 +35,11 @@ def main():
     p.add_argument("--name-en", default="", help="영문 부제 (선택)")
     p.add_argument("--panel-color", default="#23262B", help="패널 색상 hex")
     p.add_argument("--text-color", default="", help="글자 색상 hex (비우면 패널 밝기로 자동 결정)")
+    p.add_argument("--material", default="matte",
+                   choices=["matte", "glossy", "brushed_metal", "fabric"],
+                   help="패널 소재")
+    p.add_argument("--led-color", default="", help="LED 강조색 hex (비우면 글자색과 동일)")
+    p.add_argument("--depth", default="auto", help="두께감 픽셀값, 'auto' 또는 0(끄기) 또는 정수")
     p.add_argument("--weight", default="bold", choices=["regular", "bold", "extrabold"])
     p.add_argument("--vertical", action="store_true", help="세로쓰기 (돌출간판/다닥다닥형용)")
     p.add_argument("--night-glow", default="auto", help="auto / true / false")
@@ -52,6 +57,14 @@ def main():
 
     os.makedirs(os.path.dirname(os.path.abspath(args.output)) or ".", exist_ok=True)
 
+    depth = args.depth
+    if depth != "auto":
+        try:
+            depth = int(depth)
+        except ValueError:
+            print(f"[오류] --depth 값이 올바르지 않습니다: {depth}", file=sys.stderr)
+            sys.exit(1)
+
     try:
         img, geo = compose(
             args.input,
@@ -62,6 +75,9 @@ def main():
             vertical=args.vertical,
             tracking=args.tracking,
             night_glow=parse_night_glow(args.night_glow),
+            material=args.material,
+            led_color=(args.led_color or None),
+            depth_px=depth,
             out_path=args.output,
         )
     except Exception as e:

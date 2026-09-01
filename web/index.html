@@ -69,6 +69,31 @@
         </div>
       </div>
 
+      <div class="row">
+        <div class="field">
+          <label>패널 소재</label>
+          <select id="material">
+            <option value="matte" selected>무광 아크릴 (matte)</option>
+            <option value="glossy">유광 아크릴 (glossy)</option>
+            <option value="brushed_metal">브러시드 메탈</option>
+            <option value="fabric">백라이트 패브릭</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>LED 강조색 (선택)</label>
+          <div class="colorRow">
+            <input type="color" id="ledColorPicker" value="#ffffff">
+            <input type="text" id="ledColor" placeholder="비우면 글자색과 동일">
+          </div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>두께감 (px, 비우면 자동)</label>
+        <input type="text" id="depth" placeholder="auto">
+        <p class="hint">0을 입력하면 두께감(측면·그림자) 표현을 끕니다.</p>
+      </div>
+
       <div class="field checkboxField">
         <label><input type="checkbox" id="vertical"> 세로쓰기 (돌출간판·다닥다닥형 전용)</label>
       </div>

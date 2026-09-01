@@ -19,6 +19,18 @@ on:
         description: "패널 색상 hex (예: #23262B)"
         required: false
         default: "#23262B"
+      material:
+        description: "패널 소재: matte / glossy / brushed_metal / fabric"
+        required: false
+        default: "matte"
+      led_color:
+        description: "LED 강조색 hex (비우면 글자색과 동일)"
+        required: false
+        default: ""
+      depth:
+        description: "두께감 픽셀값: auto / 0(끄기) / 정수"
+        required: false
+        default: "auto"
       weight:
         description: "폰트 굵기: regular / bold / extrabold"
         required: false
@@ -70,6 +82,9 @@ jobs:
             --name-kr "${{ inputs.name_kr }}" \
             --name-en "${{ inputs.name_en }}" \
             --panel-color "${{ inputs.panel_color }}" \
+            --material "${{ inputs.material }}" \
+            --led-color "${{ inputs.led_color }}" \
+            --depth "${{ inputs.depth }}" \
             --weight "${{ inputs.weight }}" \
             $VFLAG
 
