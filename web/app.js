@@ -141,6 +141,7 @@ $("composeForm").addEventListener("submit", async (e) => {
     setStatus($("status").textContent); // keep accumulated text
 
     appendStatus("③ GitHub Actions 워크플로우 실행 요청 중...");
+    const dispatchAt = Date.now();
     await gh(`/actions/workflows/compose-signage.yml/dispatches`, settings, {
       method: "POST",
       body: JSON.stringify({
@@ -157,15 +158,34 @@ $("composeForm").addEventListener("submit", async (e) => {
     });
 
     const actionsUrl = `https://github.com/${settings.owner}/${settings.repo}/actions`;
-    appendStatus("④ 실행 요청 완료!");
-    appendStatus(`   진행 상황과 결과물(Artifact) 다운로드는 여기서 확인하세요:`);
+    appendStatus("④ 실행 요청 완료. 워크플로우 실행을 자동으로 기다리는 중...");
+    setStatus($("status").textContent);
+
+    const run = await findTriggeredRun(settings, dispatchAt);
+    appendStatus(`   실행 확인됨 (run #${run.run_number}) — 완료될 때까지 기다립니다...`);
+    setStatus($("status").textContent);
+
+    const finished = await pollRunUntilDone(settings, run.id, (s) => {
+      appendStatus(`   상태: ${translateStatus(s)}`);
+      setStatus($("status").textContent);
+    });
+
+    if (finished.conclusion !== "success") {
+      appendStatus(`⚠️ 실행이 실패로 종료됐습니다 (${finished.conclusion}).`);
+      appendStatus(`   로그 확인: ${finished.html_url}`);
+      setStatus($("status").textContent, "error");
+      return;
+    }
+
+    appendStatus("⑤ 결과물을 불러오는 중...");
+    setStatus($("status").textContent);
+
+    const outPath = `outputs/composed_${remoteName}`;
+    const dataUrl = await fetchImageAsDataUrl(settings, outPath, branch);
+
+    appendStatus("완료!");
     setStatus($("status").textContent, "ok");
-    const link = document.createElement("a");
-    link.href = actionsUrl;
-    link.target = "_blank";
-    link.textContent = actionsUrl;
-    $("status").appendChild(document.createElement("br"));
-    $("status").appendChild(link);
+    renderResult(dataUrl, remoteName);
   } catch (err) {
     console.error(err);
     setStatus("오류 발생: " + err.message, "error");
@@ -173,3 +193,61 @@ $("composeForm").addEventListener("submit", async (e) => {
     btn.disabled = false;
   }
 });
+
+// ---- 실행 완료 대기 ----
+async function findTriggeredRun(settings, sinceMs, maxTries = 8) {
+  for (let i = 0; i < maxTries; i++) {
+    await sleep(1500);
+    const data = await gh(
+      `/actions/workflows/compose-signage.yml/runs?event=workflow_dispatch&per_page=5`,
+      settings
+    );
+    const candidate = (data.workflow_runs || []).find(
+      (r) => new Date(r.created_at).getTime() >= sinceMs - 5000
+    );
+    if (candidate) return candidate;
+  }
+  throw new Error("실행된 워크플로우를 찾지 못했습니다. Actions 탭에서 직접 확인해주세요.");
+}
+
+async function pollRunUntilDone(settings, runId, onStatus, maxTries = 40) {
+  for (let i = 0; i < maxTries; i++) {
+    const run = await gh(`/actions/runs/${runId}`, settings);
+    onStatus(run.status);
+    if (run.status === "completed") return run;
+    await sleep(4000);
+  }
+  throw new Error("실행이 예상보다 오래 걸립니다. Actions 탭에서 직접 확인해주세요.");
+}
+
+function translateStatus(s) {
+  return { queued: "대기 중", in_progress: "실행 중", completed: "완료" }[s] || s;
+}
+
+async function fetchImageAsDataUrl(settings, path, branch) {
+  const data = await gh(
+    `/contents/${path}?ref=${encodeURIComponent(branch)}`,
+    settings
+  );
+  return `data:image/png;base64,${data.content.replace(/\n/g, "")}`;
+}
+
+function renderResult(dataUrl, filename) {
+  const box = document.createElement("div");
+  box.className = "resultBox";
+  const img = document.createElement("img");
+  img.src = dataUrl;
+  img.alt = "합성 결과";
+  const dl = document.createElement("a");
+  dl.href = dataUrl;
+  dl.download = `composed_${filename}`;
+  dl.textContent = "⬇ 결과 이미지 다운로드";
+  dl.className = "downloadLink";
+  box.appendChild(img);
+  box.appendChild(dl);
+  $("status").appendChild(box);
+}
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}

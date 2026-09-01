@@ -72,3 +72,29 @@ button:disabled { background: #a1a1a6; cursor: not-allowed; }
 .status a { color: #0066cc; }
 .status.error { color: #c0392b; }
 .status.ok { color: #16a34a; }
+
+.resultBox {
+  margin-top: 16px;
+  padding: 14px;
+  background: #fff;
+  border: 1px solid #e2e2e5;
+  border-radius: 12px;
+  text-align: center;
+}
+.resultBox img {
+  max-width: 100%;
+  border-radius: 8px;
+  display: block;
+  margin: 0 auto 12px;
+}
+.downloadLink {
+  display: inline-block;
+  background: #1d1d1f;
+  color: #fff;
+  text-decoration: none;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.downloadLink:hover { background: #333; }
