@@ -27,6 +27,9 @@ jobs:
       - name: Pages 설정
         uses: actions/configure-pages@v5
 
+      - name: 캐시 버스팅 (app.js에 커밋 SHA 버전 쿼리 삽입)
+        run: sed -i "s/app\.js\"/app.js?v=${{ github.sha }}\"/" web/index.html
+
       - name: web/ 폴더를 Pages 아티팩트로 업로드
         uses: actions/upload-pages-artifact@v3
         with:
