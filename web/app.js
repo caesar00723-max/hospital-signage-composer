@@ -229,6 +229,13 @@ async function fetchImageAsDataUrl(settings, path, branch) {
     `/contents/${path}?ref=${encodeURIComponent(branch)}`,
     settings
   );
+  // Contents API는 1MB 넘는 파일이면 content를 비워서 돌려준다(encoding: "none").
+  // 이 프로젝트의 합성 결과물은 보통 2~4MB라 항상 이 경로를 탄다.
+  // sha로 Blob API(최대 100MB 지원)를 통해 실제 내용을 가져온다.
+  if (!data.content || data.encoding === "none") {
+    const blob = await gh(`/git/blobs/${data.sha}`, settings);
+    return `data:image/png;base64,${blob.content.replace(/\n/g, "")}`;
+  }
   return `data:image/png;base64,${data.content.replace(/\n/g, "")}`;
 }
 
